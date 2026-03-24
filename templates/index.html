@@ -1,1 +1,234 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Dashboard WhatsApp</title>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
+    body {
+      font-family: 'Segoe UI', Arial, sans-serif;
+      background: #f0f2f5;
+      color: #333;
+      padding: 24px;
+    }
+
+    header {
+      margin-bottom: 24px;
+    }
+
+    header h1 {
+      font-size: 1.6rem;
+      color: #128c7e;
+    }
+
+    header p {
+      font-size: 0.9rem;
+      color: #666;
+      margin-top: 4px;
+    }
+
+    .kpi-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+      gap: 16px;
+      margin-bottom: 24px;
+    }
+
+    .kpi {
+      background: white;
+      border-radius: 10px;
+      padding: 16px;
+      box-shadow: 0 2px 6px rgba(0,0,0,.08);
+      text-align: center;
+    }
+
+    .kpi .value {
+      font-size: 2rem;
+      font-weight: 700;
+      color: #128c7e;
+    }
+
+    .kpi .label {
+      font-size: 0.8rem;
+      color: #888;
+      margin-top: 4px;
+    }
+
+    .chart-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+      gap: 20px;
+    }
+
+    .card {
+      background: white;
+      border-radius: 10px;
+      padding: 20px;
+      box-shadow: 0 2px 6px rgba(0,0,0,.08);
+    }
+
+    .card h2 {
+      font-size: 1rem;
+      margin-bottom: 16px;
+      color: #444;
+      border-left: 3px solid #128c7e;
+      padding-left: 8px;
+    }
+
+    canvas { max-height: 260px; }
+
+    #error-msg {
+      display: none;
+      background: #ffe0e0;
+      border: 1px solid #e57373;
+      border-radius: 8px;
+      padding: 12px;
+      margin-bottom: 16px;
+      color: #c0392b;
+    }
+  </style>
+</head>
+<body>
+
+<header>
+  <h1>ðŸ“Š Dashboard WhatsApp</h1>
+  <p id="meta-info">Carregando dados...</p>
+</header>
+
+<div id="error-msg"></div>
+
+<div class="kpi-grid">
+  <div class="kpi"><div class="value" id="kpi-total">â€“</div><div class="label">Total de mensagens</div></div>
+  <div class="kpi"><div class="value" id="kpi-links">â€“</div><div class="label">Links compartilhados</div></div>
+  <div class="kpi"><div class="value" id="kpi-texts">â€“</div><div class="label">Mensagens de texto</div></div>
+  <div class="kpi"><div class="value" id="kpi-cats">â€“</div><div class="label">Categorias ativas</div></div>
+</div>
+
+<div class="chart-grid">
+  <div class="card">
+    <h2>Mensagens por Remetente</h2>
+    <canvas id="senderChart"></canvas>
+  </div>
+  <div class="card">
+    <h2>Por Tipo</h2>
+    <canvas id="typeChart"></canvas>
+  </div>
+  <div class="card">
+    <h2>Por Categoria</h2>
+    <canvas id="categoryChart"></canvas>
+  </div>
+  <div class="card">
+    <h2>Atividade por MÃªs</h2>
+    <canvas id="timelineChart"></canvas>
+  </div>
+</div>
+
+<script>
+const COLORS = [
+  '#128c7e','#25d366','#075e54','#34b7f1','#f0b429',
+  '#e74c3c','#9b59b6','#3498db','#1abc9c','#e67e22'
+];
+
+let charts = {};
+
+function destroyChart(id) {
+  if (charts[id]) { charts[id].destroy(); delete charts[id]; }
+}
+
+function makeChart(id, type, labels, values, opts = {}) {
+  destroyChart(id);
+  const backgroundColors = labels.map((_, i) => COLORS[i % COLORS.length]);
+  charts[id] = new Chart(document.getElementById(id), {
+    type,
+    data: {
+      labels,
+      datasets: [{
+        data: values,
+        backgroundColor: backgroundColors,
+        borderColor: type === 'bar' ? backgroundColors : '#fff',
+        borderWidth: type === 'bar' ? 0 : 2,
+      }]
+    },
+    options: {
+      responsive: true,
+      plugins: {
+        legend: { display: type !== 'bar', position: 'bottom' },
+        tooltip: {
+          callbacks: {
+            label: (ctx) => {
+              const total = ctx.dataset.data.reduce((a, b) => a + b, 0);
+              const pct = ((ctx.parsed / total) * 100).toFixed(1);
+              return ` ${ctx.label}: ${ctx.parsed} (${pct}%)`;
+            }
+          }
+        }
+      },
+      scales: type === 'bar' ? {
+        y: { beginAtZero: true, ticks: { stepSize: 1 } }
+      } : {},
+      ...opts
+    }
+  });
+}
+
+async function loadData() {
+  try {
+    const res = await fetch('/api/data');
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = await res.json();
+    processData(data);
+  } catch (err) {
+    document.getElementById('error-msg').style.display = 'block';
+    document.getElementById('error-msg').textContent = `Erro ao carregar dados: ${err.message}`;
+  }
+}
+
+function processData(data) {
+  const messages = data.messages;
+  const meta = data.chat_metadata || {};
+
+  // Meta info
+  document.getElementById('meta-info').textContent =
+    `Participantes: ${(meta.participants || []).join(', ')} Â· ${messages.length} mensagens`;
+
+  // Contagens
+  const senderCount = {}, typeCount = {}, categoryCount = {}, monthCount = {};
+  let linkCount = 0, textCount = 0;
+
+  messages.forEach(msg => {
+    senderCount[msg.sender] = (senderCount[msg.sender] || 0) + 1;
+    typeCount[msg.type]     = (typeCount[msg.type]     || 0) + 1;
+    categoryCount[msg.category] = (categoryCount[msg.category] || 0) + 1;
+
+    if (msg.type === 'link') linkCount++;
+    if (msg.type === 'text') textCount++;
+
+    if (msg.timestamp) {
+      const ym = msg.timestamp.slice(0, 7); // "2025-07"
+      monthCount[ym] = (monthCount[ym] || 0) + 1;
+    }
+  });
+
+  // KPIs
+  document.getElementById('kpi-total').textContent = messages.length;
+  document.getElementById('kpi-links').textContent = linkCount;
+  document.getElementById('kpi-texts').textContent = textCount;
+  document.getElementById('kpi-cats').textContent  = Object.keys(categoryCount).length;
+
+  // GrÃ¡ficos
+  const sortedMonths = Object.keys(monthCount).sort();
+
+  makeChart('senderChart',   'bar',      Object.keys(senderCount),   Object.values(senderCount));
+  makeChart('typeChart',     'pie',      Object.keys(typeCount),     Object.values(typeCount));
+  makeChart('categoryChart', 'doughnut', Object.keys(categoryCount), Object.values(categoryCount));
+  makeChart('timelineChart', 'bar',      sortedMonths, sortedMonths.map(m => monthCount[m]));
+}
+
+loadData();
+</script>
+</body>
+</html>
+  
