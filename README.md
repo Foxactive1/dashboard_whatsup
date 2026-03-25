@@ -168,9 +168,7 @@ curl http://localhost:5000/api/data
 
 ## ⚠️ Aviso de Privacidade
 
-O arquivo `Conversa.txt` e o `mensagens.json` podem conter **dados pessoais**, como números de telefone, endereços, credenciais e informações financeiras. Antes de commitar ou compartilhar o repositório:
-
-- Remova ou anonimize o `Conversa.txt` e o `mensagens.json`
+ `Conversa.txt` e o `mensagens.json`
 - Adicione esses arquivos ao `.gitignore`
 
 ```gitignore
